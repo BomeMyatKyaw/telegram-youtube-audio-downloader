@@ -86,7 +86,7 @@ def download_audio(url: str, output_dir: str):
         "extractor_args": {
             "youtube": {
                 "player_client": [
-                    "mweb",
+                    "tv",
                 ],
             },
             "youtubepot-bgutilhttp": {
