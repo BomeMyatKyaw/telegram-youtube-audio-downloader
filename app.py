@@ -187,12 +187,11 @@ async def handle_message(
         await status_message.delete()
 
     except Exception as error:
-        logger.exception("Download error")
+        logger.exception("Download error: %s", error)
 
         await status_message.edit_text(
-            "❌ Sorry, I couldn't download this video.\n\n"
-            "The video may be unavailable, private, age-restricted, "
-            "or unsupported."
+            f"❌ Download failed.\n\n"
+            f"Error: {str(error)[:1000]}"
         )
 
     finally:
