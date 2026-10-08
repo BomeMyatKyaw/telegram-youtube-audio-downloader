@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: youtube-audio-bot
+    runtime: python
+    plan: free
+
+    buildCommand: pip install -r requirements.txt
+
+    startCommand: python app.py
+
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+
+      - key: WEBHOOK_URL
+        sync: false
