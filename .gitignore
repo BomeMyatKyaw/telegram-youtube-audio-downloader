@@ -1,4 +1,8 @@
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
+*.log
 .env
+.venv/
+venv/
+downloads/
+youtube_audio_*/

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -21,13 +22,13 @@ from telegram.ext import (
 )
 
 
-# =========================
-# Configuration
-# =========================
-
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", 10000))
+
+BGUTIL_DIR = "/opt/bgutil-ytdlp-pot-provider/server"
+BGUTIL_PORT = 4416
+
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is missing")
@@ -36,21 +37,12 @@ if not WEBHOOK_URL:
     raise RuntimeError("WEBHOOK_URL environment variable is missing")
 
 
-# =========================
-# Logging
-# =========================
-
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 
 logger = logging.getLogger(__name__)
-
-
-# =========================
-# Flask
-# =========================
 
 flask_app = Flask(__name__)
 
@@ -65,10 +57,6 @@ async def health():
     return "OK"
 
 
-# =========================
-# YouTube URL
-# =========================
-
 YOUTUBE_REGEX = re.compile(
     r"(https?://)?(www\.)?"
     r"(youtube\.com/watch\?v=[\w-]+"
@@ -82,9 +70,43 @@ def is_youtube_url(text: str) -> bool:
     return bool(YOUTUBE_REGEX.search(text))
 
 
-# =========================
-# Download audio
-# =========================
+def start_bgutil_provider():
+    """
+    Start the bgutil PO-token provider locally.
+    """
+
+    build_file = Path(BGUTIL_DIR) / "build" / "main.js"
+
+    if not build_file.exists():
+        raise RuntimeError(
+            f"bgutil provider was not built: {build_file}"
+        )
+
+    logger.info("Starting bgutil PO-token provider...")
+
+    process = subprocess.Popen(
+        [
+            "node",
+            str(build_file),
+            "--port",
+            str(BGUTIL_PORT),
+            "--host",
+            "127.0.0.1",
+        ],
+        cwd=BGUTIL_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+
+    logger.info(
+        "bgutil provider started with PID %s",
+        process.pid,
+    )
+
+    return process
+
 
 def download_audio(url: str, output_dir: str):
     output_template = str(
@@ -92,23 +114,24 @@ def download_audio(url: str, output_dir: str):
     )
 
     ydl_options = {
-        # Audio only
         "format": "bestaudio/best",
 
-        # Don't download playlists
         "noplaylist": True,
 
-        # Output filename
         "outtmpl": output_template,
 
-        # YouTube extraction
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "web"],
-            }
+                "player_client": [
+                    "android",
+                    "web",
+                ],
+            },
+            "youtubepot-bgutilhttp": {
+                "base_url": f"http://127.0.0.1:{BGUTIL_PORT}",
+            },
         },
 
-        # Convert to MP3
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -117,7 +140,6 @@ def download_audio(url: str, output_dir: str):
             }
         ],
 
-        # Logging
         "quiet": False,
         "no_warnings": False,
     }
@@ -125,28 +147,40 @@ def download_audio(url: str, output_dir: str):
     logger.info("Starting download: %s", url)
 
     with yt_dlp.YoutubeDL(ydl_options) as ydl:
-        info = ydl.extract_info(url, download=True)
+        info = ydl.extract_info(
+            url,
+            download=True,
+        )
 
-        title = info.get("title", "YouTube Audio")
+        title = info.get(
+            "title",
+            "YouTube Audio",
+        )
 
         downloaded_file = ydl.prepare_filename(info)
-        mp3_file = str(Path(downloaded_file).with_suffix(".mp3"))
 
-        logger.info("Downloaded: %s", mp3_file)
+        mp3_file = str(
+            Path(downloaded_file).with_suffix(".mp3")
+        )
+
+        logger.info(
+            "Downloaded MP3: %s",
+            mp3_file,
+        )
 
         return mp3_file, title
 
-
-# =========================
-# Telegram handlers
-# =========================
 
 async def start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
+    if not update.message:
+        return
+
     await update.message.reply_text(
-        "🎵 Send me a YouTube link and I'll send you the audio as an MP3."
+        "🎵 Send me a YouTube link and I'll send you "
+        "the audio as an MP3."
     )
 
 
@@ -154,7 +188,10 @@ async def handle_message(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    if not update.message or not update.message.text:
+    if not update.message:
+        return
+
+    if not update.message.text:
         return
 
     url = update.message.text.strip()
@@ -203,7 +240,9 @@ async def handle_message(
 
         await status_message.delete()
 
-        logger.info("Audio sent successfully.")
+        logger.info(
+            "Audio sent successfully."
+        )
 
     except Exception as error:
         logger.exception(
@@ -217,7 +256,6 @@ async def handle_message(
         )
 
     finally:
-        # Delete temporary files
         try:
             for file in Path(temp_dir).glob("*"):
                 if file.is_file():
@@ -236,10 +274,6 @@ async def handle_message(
             )
 
 
-# =========================
-# Telegram Application
-# =========================
-
 def create_application():
     application = (
         Application.builder()
@@ -249,7 +283,10 @@ def create_application():
     )
 
     application.add_handler(
-        CommandHandler("start", start)
+        CommandHandler(
+            "start",
+            start,
+        )
     )
 
     application.add_handler(
@@ -262,11 +299,10 @@ def create_application():
     return application
 
 
-# =========================
-# Main
-# =========================
-
 async def main():
+    # Start bgutil PO-token provider
+    bgutil_process = start_bgutil_provider()
+
     application = create_application()
 
     webhook_path = "/telegram"
@@ -276,11 +312,10 @@ async def main():
         + webhook_path
     )
 
-    # Initialize Telegram application
     await application.initialize()
+
     await application.start()
 
-    # Register webhook with Telegram
     await application.bot.set_webhook(
         url=webhook_full_url,
         allowed_updates=Update.ALL_TYPES,
@@ -291,7 +326,6 @@ async def main():
         webhook_full_url,
     )
 
-    # Telegram webhook endpoint
     @flask_app.post(webhook_path)
     async def telegram_webhook():
         data = request.get_json(force=True)
@@ -301,11 +335,12 @@ async def main():
             bot=application.bot,
         )
 
-        await application.update_queue.put(update)
+        await application.update_queue.put(
+            update
+        )
 
         return Response(status=200)
 
-    # Convert Flask to ASGI
     asgi_app = WsgiToAsgi(flask_app)
 
     config = uvicorn.Config(
@@ -321,13 +356,22 @@ async def main():
         await server.serve()
 
     finally:
+        logger.info(
+            "Stopping bgutil provider..."
+        )
+
+        bgutil_process.terminate()
+
+        try:
+            bgutil_process.wait(
+                timeout=5
+            )
+        except subprocess.TimeoutExpired:
+            bgutil_process.kill()
+
         await application.stop()
         await application.shutdown()
 
-
-# =========================
-# Start
-# =========================
 
 if __name__ == "__main__":
     asyncio.run(main())
