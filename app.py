@@ -5,8 +5,8 @@ import re
 import tempfile
 from pathlib import Path
 
-import yt_dlp
 import uvicorn
+import yt_dlp
 
 from asgiref.wsgi import WsgiToAsgi
 from flask import Flask, Response, request
@@ -92,16 +92,23 @@ def download_audio(url: str, output_dir: str):
     )
 
     ydl_options = {
-        # Audio stream only
+        # Audio only
         "format": "bestaudio/best",
 
         # Don't download playlists
         "noplaylist": True,
 
-        # Output
+        # Output filename
         "outtmpl": output_template,
 
-        # FFmpeg conversion
+        # YouTube extraction
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+            }
+        },
+
+        # Convert to MP3
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -110,22 +117,22 @@ def download_audio(url: str, output_dir: str):
             }
         ],
 
-        # Reduce console output
-        "quiet": True,
-        "no_warnings": True,
-
-        # Avoid unnecessary files
-        "writethumbnail": False,
+        # Logging
+        "quiet": False,
+        "no_warnings": False,
     }
+
+    logger.info("Starting download: %s", url)
 
     with yt_dlp.YoutubeDL(ydl_options) as ydl:
         info = ydl.extract_info(url, download=True)
 
         title = info.get("title", "YouTube Audio")
 
-        # yt-dlp changes the extension to mp3 after FFmpeg conversion
         downloaded_file = ydl.prepare_filename(info)
         mp3_file = str(Path(downloaded_file).with_suffix(".mp3"))
+
+        logger.info("Downloaded: %s", mp3_file)
 
         return mp3_file, title
 
@@ -134,7 +141,10 @@ def download_audio(url: str, output_dir: str):
 # Telegram handlers
 # =========================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
     await update.message.reply_text(
         "🎵 Send me a YouTube link and I'll send you the audio as an MP3."
     )
@@ -159,7 +169,9 @@ async def handle_message(
         "⏳ Downloading audio..."
     )
 
-    temp_dir = tempfile.mkdtemp(prefix="youtube_audio_")
+    temp_dir = tempfile.mkdtemp(
+        prefix="youtube_audio_"
+    )
 
     try:
         mp3_file, title = await asyncio.to_thread(
@@ -170,8 +182,13 @@ async def handle_message(
 
         if not os.path.exists(mp3_file):
             raise FileNotFoundError(
-                "MP3 file was not created."
+                f"MP3 file was not created: {mp3_file}"
             )
+
+        logger.info(
+            "Sending MP3 to Telegram: %s",
+            mp3_file,
+        )
 
         await status_message.edit_text(
             "📤 Uploading audio..."
@@ -186,11 +203,16 @@ async def handle_message(
 
         await status_message.delete()
 
+        logger.info("Audio sent successfully.")
+
     except Exception as error:
-        logger.exception("Download error: %s", error)
+        logger.exception(
+            "Download error: %s",
+            error,
+        )
 
         await status_message.edit_text(
-            f"❌ Download failed.\n\n"
+            "❌ Download failed.\n\n"
             f"Error: {str(error)[:1000]}"
         )
 
@@ -198,21 +220,27 @@ async def handle_message(
         # Delete temporary files
         try:
             for file in Path(temp_dir).glob("*"):
-                file.unlink(missing_ok=True)
+                if file.is_file():
+                    file.unlink()
 
             Path(temp_dir).rmdir()
 
-        except Exception:
+            logger.info(
+                "Temporary files cleaned up."
+            )
+
+        except Exception as cleanup_error:
             logger.warning(
-                "Could not completely clean temporary files."
+                "Cleanup failed: %s",
+                cleanup_error,
             )
 
 
 # =========================
-# Telegram webhook
+# Telegram Application
 # =========================
 
-async def create_application():
+def create_application():
     application = (
         Application.builder()
         .token(BOT_TOKEN)
@@ -239,29 +267,31 @@ async def create_application():
 # =========================
 
 async def main():
-    application = await create_application()
+    application = create_application()
 
     webhook_path = "/telegram"
 
     webhook_full_url = (
-        WEBHOOK_URL.rstrip("/") + webhook_path
+        WEBHOOK_URL.rstrip("/")
+        + webhook_path
     )
 
     # Initialize Telegram application
     await application.initialize()
     await application.start()
 
-    # Tell Telegram where to send updates
+    # Register webhook with Telegram
     await application.bot.set_webhook(
         url=webhook_full_url,
         allowed_updates=Update.ALL_TYPES,
     )
 
     logger.info(
-        "Webhook set to: %s",
+        "Telegram webhook set: %s",
         webhook_full_url,
     )
 
+    # Telegram webhook endpoint
     @flask_app.post(webhook_path)
     async def telegram_webhook():
         data = request.get_json(force=True)
@@ -294,6 +324,10 @@ async def main():
         await application.stop()
         await application.shutdown()
 
+
+# =========================
+# Start
+# =========================
 
 if __name__ == "__main__":
     asyncio.run(main())
