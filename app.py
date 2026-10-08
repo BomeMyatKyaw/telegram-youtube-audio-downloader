@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -25,9 +24,6 @@ from telegram.ext import (
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", 10000))
-
-BGUTIL_DIR = "/opt/bgutil-ytdlp-pot-provider/server"
-BGUTIL_PORT = 4416
 
 
 if not BOT_TOKEN:
@@ -70,44 +66,6 @@ def is_youtube_url(text: str) -> bool:
     return bool(YOUTUBE_REGEX.search(text))
 
 
-def start_bgutil_provider():
-    """
-    Start the bgutil PO-token provider locally.
-    """
-
-    build_file = Path(BGUTIL_DIR) / "build" / "main.js"
-
-    if not build_file.exists():
-        raise RuntimeError(
-            f"bgutil provider was not built: {build_file}"
-        )
-
-    logger.info("Starting bgutil PO-token provider...")
-
-    process = subprocess.Popen(
-        [
-            "node",
-            str(build_file),
-            "--port",
-            str(BGUTIL_PORT),
-            "--host",
-            "127.0.0.1",
-        ],
-        cwd=BGUTIL_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-
-    logger.info(
-        "bgutil provider started with PID %s",
-        process.pid,
-    )
-
-    return process
-
-
 def download_audio(url: str, output_dir: str):
     output_template = str(
         Path(output_dir) / "%(title).200s.%(ext)s"
@@ -115,20 +73,12 @@ def download_audio(url: str, output_dir: str):
 
     ydl_options = {
         "format": "bestaudio/best",
-
         "noplaylist": True,
-
         "outtmpl": output_template,
 
         "extractor_args": {
-            "youtube": {
-                "player_client": [
-                    "android",
-                    "web",
-                ],
-            },
             "youtubepot-bgutilhttp": {
-                "base_url": f"http://127.0.0.1:{BGUTIL_PORT}",
+                "base_url": "http://127.0.0.1:4416",
             },
         },
 
@@ -300,9 +250,6 @@ def create_application():
 
 
 async def main():
-    # Start bgutil PO-token provider
-    bgutil_process = start_bgutil_provider()
-
     application = create_application()
 
     webhook_path = "/telegram"
@@ -313,7 +260,6 @@ async def main():
     )
 
     await application.initialize()
-
     await application.start()
 
     await application.bot.set_webhook(
@@ -335,9 +281,7 @@ async def main():
             bot=application.bot,
         )
 
-        await application.update_queue.put(
-            update
-        )
+        await application.update_queue.put(update)
 
         return Response(status=200)
 
@@ -354,21 +298,7 @@ async def main():
 
     try:
         await server.serve()
-
     finally:
-        logger.info(
-            "Stopping bgutil provider..."
-        )
-
-        bgutil_process.terminate()
-
-        try:
-            bgutil_process.wait(
-                timeout=5
-            )
-        except subprocess.TimeoutExpired:
-            bgutil_process.kill()
-
         await application.stop()
         await application.shutdown()
 

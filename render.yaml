@@ -6,12 +6,14 @@ services:
 
     buildCommand: |
       pip install -r requirements.txt
-      git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil-ytdlp-pot-provider
-      cd /opt/bgutil-ytdlp-pot-provider/server
+      git clone --depth 1 --branch 2.0.0 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil
+      cd /opt/bgutil/server
       npm ci
       npx tsc
 
-    startCommand: python app.py
+    startCommand: |
+      node /opt/bgutil/server/build/main.js --host 127.0.0.1 --port 4416 &
+      python app.py
 
     envVars:
       - key: BOT_TOKEN
