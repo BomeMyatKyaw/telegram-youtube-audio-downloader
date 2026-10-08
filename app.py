@@ -25,6 +25,8 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 PORT = int(os.environ.get("PORT", 10000))
 
+COOKIE_FILE = "/etc/secrets/cookies.txt"
+
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is missing")
@@ -53,10 +55,6 @@ async def health():
     return "OK"
 
 
-# Supported YouTube URLs:
-# https://www.youtube.com/watch?v=VIDEO_ID
-# https://youtu.be/VIDEO_ID
-# https://www.youtube.com/shorts/VIDEO_ID
 YOUTUBE_REGEX = re.compile(
     r"(https?://)?(www\.)?"
     r"(youtube\.com/watch\?v=[\w-]+"
@@ -82,11 +80,14 @@ def download_audio(url: str, output_dir: str):
 
         "outtmpl": output_template,
 
+        # YouTube authentication cookies
+        "cookiefile": COOKIE_FILE,
+
         # YouTube + bgutil PO Token provider
         "extractor_args": {
             "youtube": {
                 "player_client": [
-                    "tv",
+                    "mweb",
                 ],
             },
             "youtubepot-bgutilhttp": {
@@ -103,15 +104,13 @@ def download_audio(url: str, output_dir: str):
             }
         ],
 
-        # Temporary debugging.
-        # This lets us verify that bgutil is loaded
-        # in the Render logs.
+        # Temporary debugging
         "verbose": True,
         "quiet": False,
         "no_warnings": False,
     }
 
-    logger.info("Starting download: %s", url)
+    logger.info("Starting download")
 
     with yt_dlp.YoutubeDL(ydl_options) as ydl:
         info = ydl.extract_info(
