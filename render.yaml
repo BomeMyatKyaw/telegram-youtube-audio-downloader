@@ -4,7 +4,16 @@ services:
     runtime: python
     plan: free
 
-    buildCommand: pip install -r requirements.txt
+    buildCommand: |
+      pip install -r requirements.txt
+
+      git clone --depth 1 --branch 2.0.2 \
+        https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
+        /opt/bgutil-ytdlp-pot-provider
+
+      cd /opt/bgutil-ytdlp-pot-provider/server
+      npm ci
+      npx tsc
 
     startCommand: python app.py
 

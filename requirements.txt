@@ -1,5 +1,6 @@
 python-telegram-bot==22.8
 yt-dlp
+bgutil-ytdlp-pot-provider
 flask[async]
 uvicorn
 asgiref
