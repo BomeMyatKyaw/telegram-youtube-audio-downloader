@@ -53,6 +53,10 @@ async def health():
     return "OK"
 
 
+# Supported YouTube URLs:
+# https://www.youtube.com/watch?v=VIDEO_ID
+# https://youtu.be/VIDEO_ID
+# https://www.youtube.com/shorts/VIDEO_ID
 YOUTUBE_REGEX = re.compile(
     r"(https?://)?(www\.)?"
     r"(youtube\.com/watch\?v=[\w-]+"
@@ -73,15 +77,24 @@ def download_audio(url: str, output_dir: str):
 
     ydl_options = {
         "format": "bestaudio/best",
+
         "noplaylist": True,
+
         "outtmpl": output_template,
 
+        # YouTube + bgutil PO Token provider
         "extractor_args": {
+            "youtube": {
+                "player_client": [
+                    "mweb",
+                ],
+            },
             "youtubepot-bgutilhttp": {
                 "base_url": "http://127.0.0.1:4416",
             },
         },
 
+        # Convert downloaded audio to MP3
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -90,6 +103,10 @@ def download_audio(url: str, output_dir: str):
             }
         ],
 
+        # Temporary debugging.
+        # This lets us verify that bgutil is loaded
+        # in the Render logs.
+        "verbose": True,
         "quiet": False,
         "no_warnings": False,
     }
@@ -200,10 +217,15 @@ async def handle_message(
             error,
         )
 
-        await status_message.edit_text(
-            "❌ Download failed.\n\n"
-            f"Error: {str(error)[:1000]}"
-        )
+        try:
+            await status_message.edit_text(
+                "❌ Download failed.\n\n"
+                f"Error: {str(error)[:1000]}"
+            )
+        except Exception:
+            logger.exception(
+                "Failed to update Telegram status message."
+            )
 
     finally:
         try:
@@ -298,6 +320,7 @@ async def main():
 
     try:
         await server.serve()
+
     finally:
         await application.stop()
         await application.shutdown()
